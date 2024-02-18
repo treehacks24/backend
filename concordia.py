@@ -190,5 +190,5 @@ def summarize_insights(user_feedback, past_game_history):
 
 
 if __name__ == '__main__':
-    new_env, insights = optimize(["", "", ""], "", "", None)
+    new_env, insights = optimize(["im a fun gal who hates the government", "the government is the best! but dont make me care about the poor...", "i love the poor, and think insurance is somewhat useful."], "", "", None)
     logger.info(f'insights: {insights}')
