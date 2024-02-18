@@ -25,6 +25,7 @@ def reset_db():
 
     redis.jset("users", [])
     redis.jset("num_users", 0)
+    redis.jset("state", {}) # TODO
 
 
 @app.get("/createuser")
@@ -53,5 +54,24 @@ def getallusers():
     logger.info(users)
     return {"users": users, "num_users": redis.jget("num_users")}
 
+
+@app.get("/savechat")
+def savechat(user_id: int, timestamp: float, chat: str):    
+    redis.jset(f'chat_{timestamp}_{userid}', chat)
+
+@app.get('/sendaction')
+def sendaction(user_id: int, timestamp: float, action: str):    
+    redis.jset(f'action_{timestamp}_{userid}', chat)
+    # call into concordia
+    
+@app.get('/sendfeeback')
+def sendfeeback(user_id: int, timestamp: float, feedback: str):    
+    redis.jset(f'feedback_{timestamp}_{userid}', chat)
+    # call into concordia
+
+@app.get('/getstate')
+def sendfeeback(user_id: int, timestamp: float, feedback: str):    
+    return redis.jget(f'state')
+    
 
 reset_db()
