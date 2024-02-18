@@ -5,7 +5,7 @@ from loguru import logger
 # from gpt_language import gptmodel
 from openai import OpenAI
 
-client = OpenAI(api_key='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')
+client = OpenAI(api_key='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')#!! TODO remove
 
 def get_state(insurance_plans):
     idx = random.randint(0, 2)
@@ -20,7 +20,7 @@ def get_state(insurance_plans):
 
 action_space = ['Nothing', 'Switch 0', 'Switch 1', 'Switch 2', 'Work', 'Play', 'Invest']
 
-def transition(state, action, insurance_plans, prob_accident=.99):
+def transition(state, action, insurance_plans, prob_accident=.5):
     next_state = {}
     for s_key, a in zip(state, action):
         s = state[s_key]
@@ -113,28 +113,31 @@ def optimize(
     user_bkgrd: List[str],
     user_feedback: str,
     past_game_history: str,
+    past_env_params: str,
     num_iterations=1,
 ):
     """
     Note: User feedback can be (values, commments/complaints on env, proposal on env)
     """
     for i in range(num_iterations):
+        logger.info(f'Outer optimization step: {i}')
         env = get_env(
             user_bkgrd=user_bkgrd,
-            user_feedback=user_feedback,
+            user_feedback=user_feedback,            
             past_game_history=past_game_history,
+            env_params=past_env_params,
         )
         user_feedback, past_game_history = simulate_with_agents(
-            env, user_bkgrd=user_bkgrd
+            env, past_game_history, user_bkgrd=user_bkgrd
         )
 
-    return env, summarize_insights(past_game_history)
+    return env, summarize_insights(user_feedback, past_game_history)
 
 
-def get_all_actions(state, user_bkgrd):
+def get_all_actions(state, past_game_history, user_bkgrd):
     action_set = []
     for i in range(len(user_bkgrd)):
-        prompt = 'Using only 100 tokens, get all action set on' + state + 'given' + 'user background' + user_bkgrd[i]
+        prompt = f'Using only 100 tokens, choose an optimal action in {action_space} on {state} given user background {user_bkgrd[i]} and past user behavior {past_game_history}'
         action_set.append(client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
@@ -145,20 +148,25 @@ def get_all_actions(state, user_bkgrd):
 
     return action_set
 
+def get_all_actions_local(state, user_bkgrd):
+    pass
 
-def simulate_with_agents(env, user_bkgrd, num_iterations=10):
-    state = env.reset()
+def simulate_with_agents(env, past_game_history, user_bkgrd, num_iterations=3):
+    _, _, _, env_params = env
+
+    state = {i: get_state(env_params) for i in range(len(user_bkgrd))}
     history = [state]
     for i in range(num_iterations):
-        actions = get_all_actions(state, user_bkgrd)# this should call concordia stuff, all actions for all users.
-        state = env.step(state, actions)
-        # TODO: Check how env.step works
+        logger.info(f'>>Inner optimization step: {i}')
+        actions = get_all_actions(state, past_game_history, user_bkgrd)# this should call concordia stuff, all actions for all users.
+        state = transition(state, actions, env_params)
+        # TODO: Check how env.step works        
         history.append(state)
     
     user_feedback = []
 
     for j in range(len(user_bkgrd)):
-        prompt = 'For' + user_bkgrd[j] + 'with the past history' + history + ', what is good and bad for the user given the history? What has the user learnt?. Use 100 tokens or less.'
+        prompt = f'For {user_bkgrd[j]} with the past history {history}, what is good and bad for the user given the history? What has the user learnt?. Use 100 tokens or less.'
         user_feedback.append(client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
@@ -168,14 +176,19 @@ def simulate_with_agents(env, user_bkgrd, num_iterations=10):
             ).choices[0].message.content)
     return user_feedback, history
     
-def summarize_insights(past_game_history):
-    prompt = 'Please summarize the most salient points of:' + past_game_history + 'Do not use more than 100 tokens. Summary:'
-    print(prompt)
-    response = client.chat.completions.create(
+def summarize_insights(user_feedback, past_game_history):
+    prompt = f'Please summarize the most salient points of: {past_game_history}. Here is the user feedback: {user_feedback}.  Do not use more than 100 tokens. Insight Summary:'
+    logger.info(prompt)
+    insights = client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
             {"role": "system", "content": prompt}
         ],
             max_tokens=100
             ).choices[0].message.content
-    return response
+    return insights
+
+
+if __name__ == '__main__':
+    new_env, insights = optimize(["", "", ""], "", "", None)
+    logger.info(f'insights: {insights}')

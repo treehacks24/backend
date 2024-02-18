@@ -114,20 +114,22 @@ def sendaction(user_id: str, action: str):
     
     return next_state
     
-@app.get('/sendfeeback')
+@app.get('/sendfeedback')
 def sendfeeback(user_id: str, feedback: str):    
-    timestamp = time.time()
-    redis.jset(f'feedback_{timestamp}_{user_id}', feedback)
+    redis.jset(f'feedback', redis.jget('feedback') + '\n' + feedback)
 
 @app.get('/optimize')
 def optimize():
     # TODO: send the stuff to concordia to process
       #  concordia.process_feedback(user_id, feedback)
         
-    user_bkgrd = None
-    user_feedback = None
+    user_bkgrd = ["" for i in redis.jget("users")] # TODO add actual background
+    user_feedback = redis.jget('feedback')
     past_game_history = redis.jget('chat')
-    concordia.optimize(user_bkgrd, user_feedback, past_game_history, redis.jget('env_params'), num_iterations=1)
+    new_env, insights = concordia.optimize(user_bkgrd, user_feedback, past_game_history, str(redis.jget('env_params')), num_iterations=1)
+    logger.info('Set new environment params!')
+    redis.jset('env_params', new_env[-1]) # TODO start the next round
+    return insights
 
 
 @app.get('/getstate')
