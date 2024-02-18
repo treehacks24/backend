@@ -74,8 +74,18 @@ def optimize(
     return env, summarize_insights(past_game_history)
 
 def get_all_actions(state, user_bkgrd):
-    pass 
+    action_set = []
+    for i in range(len(user_bkgrd)):
+        prompt = 'Using only 100 tokens, get all action set on' + state + 'given' + 'user background' + user_bkgrd[i]
+        action_set.append(client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+            {"role": "system", "content": prompt}
+        ],
+            max_tokens=100
+            ).choices[0].message.content) # how to get minibatch working here?
 
+    return action_set
 
 def simulate_with_agents(env, user_bkgrd, num_iterations=10):
     state = env.reset()
@@ -83,6 +93,7 @@ def simulate_with_agents(env, user_bkgrd, num_iterations=10):
     for i in range(num_iterations):
         actions = get_all_actions(state, user_bkgrd)# this should call concordia stuff, all actions for all users.
         state = env.step(state, actions)
+        # TODO: Check how env.step works
         history.append(state)
     
     user_feedback = []
@@ -96,6 +107,8 @@ def simulate_with_agents(env, user_bkgrd, num_iterations=10):
         ],
             max_tokens=100
             ).choices[0].message.content)
+    return user_feedback, history
+
 
         # user_feedback.append(model.sample_text('For:\n'
         #                               + '\n'.join(user_bkgrd[j])
@@ -104,7 +117,6 @@ def simulate_with_agents(env, user_bkgrd, num_iterations=10):
         #                               + 'what is good and bad for the user given the history? What has the user learnt?'))
      # just create a prompt  here like: giving that you are user_bkgrd[i], what is good and bad for you about history? what have you learned about yourself?
     #user_feedback = # get_feedback(user_bkgrd, history)
-    return user_feedback, history
 
     
 def summarize_insights(past_game_history):
@@ -123,12 +135,8 @@ def summarize_insights(past_game_history):
     response = client.chat.completions.create(
             model="gpt-4-turbo-preview",
             messages=[
-            {"role": "system", "content": "You will summarise saliently." + prompt}
+            {"role": "system", "content": prompt}
         ],
             max_tokens=100
             ).choices[0].message.content
     return response
-
-
-#     # return llm.call(f"Please summarize the most salient points of {past_game_history}")
-# print(summarize_insights("this game is about picking apples. there's a lot of apples to pick."))

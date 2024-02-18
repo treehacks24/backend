@@ -1,7 +1,7 @@
 import time
 from typing import Union
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from db.redis import conn as redis
 from loguru import logger
@@ -42,19 +42,20 @@ def reset_db():
     redis.jset("users", [])
     redis.jset("num_users", 0)
     
-    state_space, action_space, transition = concordia.get_env(user_bkgrd='No background', user_feedback='No feedback', past_game_history='No history')
-    redis.jset('state_space', state_space)
-    redis.jset('action_space', action_space)
-    redis.jset('transition', transition)
+    state_space, action_space, transition, env_params = concordia.get_env(user_bkgrd=['No background'], user_feedback='No feedback', past_game_history='No history')
+    # redis.jset('state_space', state_space)
+    # redis.jset('action_space', action_space)
+    # redis.jset('transition', transition)
+    redis.jset('env_params', env_params)
     
-    redis.jset("state", {'round':0, 'game_state': []}) 
+    redis.jset("state", {'round':0, 'game_state': {}}) 
+    
     
 
 
 @app.get("/createuser")
-def createuser(name: str):
+def createuser(name: str, user_id: str):
     users = redis.jget("users")
-    user_id = redis.jget("num_users") + 1
 
     redis.jset(
         f"user_{user_id}",
@@ -68,9 +69,10 @@ def createuser(name: str):
     redis.jset("num_users", redis.jget("num_users") + 1)
     
     state = redis.jget('state')
-    state['game_state'].append(redis.jget('state_space'))
+    state['game_state'][user_id] = concordia.get_state(redis.jget('env_params'))
     redis.jset('state', state)
     return {"user_id": user_id}
+
 
 
 @app.get("/getallusers")
@@ -83,32 +85,37 @@ def getallusers():
 
 
 @app.get("/savechat")
-def savechat(user_id: int, chat: str):    
-    timestamp = time.time()
-    redis.jset(f'chat_{timestamp}_{user_id}', chat)
+def savechat(chat: str):    
+   # timestamp = time.time()
+    # redis.jset(f'chat_{timestamp}', chat)
+    # TODO support multiple rounds with time and save chat as list with user identities
+    redis.jset(f'chat', chat)
 
 @app.get('/sendaction')
-def sendaction(user_id: int, action: str):    
+def sendaction(user_id: str, action: str):    
     timestamp = time.time()
     st = redis.jget("state")
 
     redis.jset(f"action_{timestamp}_{user_id}_{st['round']}", action)
-    
+    logger.info('Set action key!')
     keys = redis.keys(pattern=f"*_{st['round']}")
+    logger.info(f'Num keys: {len(keys)}')
     if len(keys) != redis.jget('num_users') :
         return 'Not all actions taken'
-
-    actions = [redis.jget(key) for key in keys]
-    transition_function = eval(redis.jget('principal_transition')) 
     
-    next_state = transition_function(st['game_state'], actions)
+    logger.info('Running actions')
+    actions = [redis.jget(key) for key in keys]
+
+    #* NOTE this is env.step    
+    next_state = concordia.transition(st['game_state'], actions, redis.jget('env_params'))
+    st['round'] += 1
     st['game_state'] = next_state
     redis.jset('state', st)
     
     return next_state
     
 @app.get('/sendfeeback')
-def sendfeeback(user_id: int, feedback: str):    
+def sendfeeback(user_id: str, feedback: str):    
     timestamp = time.time()
     redis.jset(f'feedback_{timestamp}_{user_id}', feedback)
 
@@ -116,11 +123,20 @@ def sendfeeback(user_id: int, feedback: str):
 def optimize():
     # TODO: send the stuff to concordia to process
       #  concordia.process_feedback(user_id, feedback)
-    # call into concordia
-    pass
+        
+    user_bkgrd = None
+    user_feedback = None
+    past_game_history = redis.jget('chat')
+    concordia.optimize(user_bkgrd, user_feedback, past_game_history, redis.jget('env_params'), num_iterations=1)
+
 
 @app.get('/getstate')
-def getstate(user_id: int):    
-    return redis.jget(f'state')['game_state'][user_id]
+def getstate(user_id: str):
+    try:
+        return redis.jget('state')['game_state'][user_id]
+    except IndexError:
+        raise HTTPException(status_code=400, detail="User id does not exist")
 
 reset_db()
+
+
