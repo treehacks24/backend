@@ -1,14 +1,30 @@
+import time
 from typing import Union
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 from db.redis import conn as redis
 from loguru import logger
+from fastapi.middleware.cors import CORSMiddleware
+import numpy as np
+# import concordia_bend
 
+import concordia
+
+origins = [
+    "*",
+]
 # IMPORTANT REDIS KEYS
 # user_ids: List[int]
-import numpy as np
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 
 @app.get("/printdb")
@@ -25,7 +41,14 @@ def reset_db():
 
     redis.jset("users", [])
     redis.jset("num_users", 0)
-    redis.jset("state", {}) # TODO
+    
+    state_space, action_space, transition = concordia.get_env(user_bkgrd='No background', user_feedback='No feedback', past_game_history='No history')
+    redis.jset('state_space', state_space)
+    redis.jset('action_space', action_space)
+    redis.jset('transition', transition)
+    
+    redis.jset("state", {'round':0, 'game_state': []}) 
+    
 
 
 @app.get("/createuser")
@@ -43,6 +66,10 @@ def createuser(name: str):
     )
     redis.jset("users", users + [user_id])
     redis.jset("num_users", redis.jget("num_users") + 1)
+    
+    state = redis.jget('state')
+    state['game_state'].append(redis.jget('state_space'))
+    redis.jset('state', state)
     return {"user_id": user_id}
 
 
@@ -56,22 +83,44 @@ def getallusers():
 
 
 @app.get("/savechat")
-def savechat(user_id: int, timestamp: float, chat: str):    
-    redis.jset(f'chat_{timestamp}_{userid}', chat)
+def savechat(user_id: int, chat: str):    
+    timestamp = time.time()
+    redis.jset(f'chat_{timestamp}_{user_id}', chat)
 
 @app.get('/sendaction')
-def sendaction(user_id: int, timestamp: float, action: str):    
-    redis.jset(f'action_{timestamp}_{userid}', chat)
-    # call into concordia
+def sendaction(user_id: int, action: str):    
+    timestamp = time.time()
+    st = redis.jget("state")
+
+    redis.jset(f"action_{timestamp}_{user_id}_{st['round']}", action)
+    
+    keys = redis.keys(pattern=f"*_{st['round']}")
+    if len(keys) != redis.jget('num_users') :
+        return 'Not all actions taken'
+
+    actions = [redis.jget(key) for key in keys]
+    transition_function = eval(redis.jget('principal_transition')) 
+    
+    next_state = transition_function(st['game_state'], actions)
+    st['game_state'] = next_state
+    redis.jset('state', st)
+    
+    return next_state
     
 @app.get('/sendfeeback')
-def sendfeeback(user_id: int, timestamp: float, feedback: str):    
-    redis.jset(f'feedback_{timestamp}_{userid}', chat)
+def sendfeeback(user_id: int, feedback: str):    
+    timestamp = time.time()
+    redis.jset(f'feedback_{timestamp}_{user_id}', feedback)
+
+@app.get('/optimize')
+def optimize():
+    # TODO: send the stuff to concordia to process
+      #  concordia.process_feedback(user_id, feedback)
     # call into concordia
+    pass
 
 @app.get('/getstate')
-def sendfeeback(user_id: int, timestamp: float, feedback: str):    
-    return redis.jget(f'state')
-    
+def getstate(user_id: int):    
+    return redis.jget(f'state')['game_state'][user_id]
 
 reset_db()

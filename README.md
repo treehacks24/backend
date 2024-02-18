@@ -3,14 +3,10 @@
 
 ```
 poetry install
+poetry shell
 uvicorn main:app --reload
 ```
 
-## Deploy
-
-```
-uvicorn main:app --host 0.0.0.0 --port 80
-```
 
 start redis db
 ```
@@ -25,3 +21,9 @@ docker run --name db -p 27017:27017  -d mongo:latest
 
 
 
+
+## Deploy
+
+```
+uvicorn main:app --host 0.0.0.0 --port 80
+```
